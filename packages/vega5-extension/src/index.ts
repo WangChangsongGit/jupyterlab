@@ -76,8 +76,6 @@ export class RenderedVega extends Widget implements IRenderMime.IRenderer {
 
     const vega =
       Private.vega != null ? Private.vega : await Private.ensureVega();
-    const path = await this._resolver.resolveUrl('');
-    const baseURL = await this._resolver.getDownloadUrl(path);
 
     const el = document.createElement('div');
 
@@ -85,15 +83,29 @@ export class RenderedVega extends Widget implements IRenderMime.IRenderer {
     this.node.textContent = '';
     this.node.appendChild(el);
 
+    if (this._result) {
+      this._result.view.finalize();
+    }
+
+    const loader = vega.vega.loader({
+      http: { credentials: 'same-origin' }
+    });
+    const sanitize = async (uri: string, options: any) => {
+      // Use the resolver for any URIs it wants to handle
+      const resolver = this._resolver;
+      if (resolver.isLocal(uri)) {
+        const absPath = await resolver.resolveUrl(uri);
+        uri = await resolver.getDownloadUrl(absPath);
+      }
+      return loader.sanitize(uri, options);
+    };
+
     this._result = await vega.default(el, spec, {
       actions: true,
       defaultStyle: true,
       ...embedOptions,
       mode,
-      loader: {
-        baseURL,
-        http: { credentials: 'same-origin' }
-      }
+      loader: { ...loader, sanitize }
     });
 
     if (model.data['image/png']) {

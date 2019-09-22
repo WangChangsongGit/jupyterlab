@@ -129,10 +129,21 @@ meets the following criteria:
 -  Has a ``jupyterlab`` key in its ``package.json`` which has
    ``"extension"`` metadata. The value can be ``true`` to use the main
    module of the package, or a string path to a specific module (e.g.
-   ``"lib/foo"``).
+   ``"lib/foo"``). Example::
+
+        "jupyterlab": {
+          "extension": true
+        }
+
 -  It is also recommended to include the keyword ``jupyterlab-extension``
    in the ``package.json``, to aid with discovery (e.g. by the extension
-   manager).
+   manager). Example::
+
+       "keywords": [
+         "jupyter",
+         "jupyterlab",
+         "jupyterlab-extension"
+       ],
 
 While authoring the extension, you can use the command:
 
@@ -144,10 +155,11 @@ While authoring the extension, you can use the command:
 
 This causes the builder to re-install the source folder before building
 the application files. You can re-build at any time using
-``jupyter lab build`` and it will reinstall these packages. You can also
-link other local ``npm`` packages that you are working on simultaneously
-using ``jupyter labextension link``; they will be re-installed but not
-considered as extensions. Local extensions and linked packages are
+``jupyter lab build`` and it will reinstall these packages.
+
+You can also link other local ``npm`` packages that you are working on
+simultaneously using ``jupyter labextension link``; they will be re-installed
+but not considered as extensions. Local extensions and linked packages are
 included in ``jupyter labextension list``.
 
 When using local extensions and linked packages, you can run the command
@@ -223,6 +235,9 @@ path on the user's machine or a provided tarball. Any valid
 ``jupyter labextension install`` (e.g. ``foo@latest``, ``bar@3.0.0.0``,
 ``path/to/folder``, and ``path/to/tar.gz``).
 
+Testing your extension
+^^^^^^^^^^^^^^^^^^^^^^
+
 There are a number of helper functions in ``testutils`` in this repo (which
 is a public ``npm`` package called ``@jupyterlab/testutils``) that can be used when
 writing tests for an extension.  See ``tests/test-application`` for an example
@@ -231,6 +246,49 @@ that points to the parent directory's ``karma`` config, and a test runner,
 ``run-test.py`` that starts a Jupyter server.
 
 
+If you are using `jest <https://jestjs.io/>`__ to test your extension, you will
+need to transpile the jupyterlab packages to ``commonjs`` as they are using ES6 modules
+that ``node`` does not support.
+
+To transpile jupyterlab packages, you need to install the following package:
+
+::
+
+   jlpm add --dev jest@^24 @types/jest@^24 ts-jest@^24 @babel/core@^7 @babel/preset-env@^7
+
+Then in `jest.config.js`, you will specify to use babel for js files and ignore
+all node modules except the jupyterlab ones:
+
+::
+
+   module.exports = {
+     preset: 'ts-jest/presets/js-with-babel',
+     moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
+     transformIgnorePatterns: ['/node_modules/(?!(@jupyterlab/.*)/)'],
+     globals: {
+       'ts-jest': {
+         tsConfig: 'tsconfig.json'
+       }
+     },
+     ... // Other options useful for your extension
+   };
+
+Finally, you will need to configure babel with a ``babel.config.js`` file containing:
+
+::
+
+   module.exports = {
+     presets: [
+       [
+         '@babel/preset-env',
+         {
+           targets: {
+             node: 'current'
+           }
+         }
+       ]
+     ]
+   };
 
 .. _rendermime:
 
@@ -552,6 +610,7 @@ extensions, as well as in the core codebase.
 
 .. _ext-author-companion-packages:
 
+
 Companion Packages
 ^^^^^^^^^^^^^^^^^^
 
@@ -633,3 +692,36 @@ Currently supported package managers are:
 
 - ``pip``
 - ``conda``
+
+
+
+Shipping Packages
+^^^^^^^^^^^^^^^^^
+Most extensions are single JavaScript packages, and can be shipped on npmjs.org.
+This makes them discoverable by the JupyterLab extension manager, provided they
+have the ``jupyterlab-extension`` keyword  in their ``package.json``.  If the package also
+contains a server extension (Python package), the author has two options.
+The server extension and the JupyterLab extension can be shipped in a single package,
+or they can be shipped separately.
+
+The JupyterLab extension can be bundled in a package on PyPI and conda-forge so
+that it ends up in the user's application directory.  Note that the user will still have to run ``jupyter lab build``
+(or build when prompted in the UI) in order to use the extension.
+The general idea is to pack the Jupyterlab extension using ``npm pack``, and then
+use the ``data_files`` logic in ``setup.py`` to ensure the file ends up in the
+``<jupyterlab_application>/share/jupyter/lab/extensions``
+directory.
+
+Note that even if the JupyterLab extension is unusable without the
+server extension, as long as you use the companion package metadata it is still
+useful to publish it to npmjs.org so it is discoverable by the JupyterLab extension manager.
+
+The server extension can be enabled on install by using ``data_files``.
+an example of this approach is `jupyterlab-matplotlib <https://github.com/matplotlib/jupyter-matplotlib/tree/ce9cc91e52065d33e57c3265282640f2aa44e08f>`__.  The file used to enable the server extension is `here <https://github.com/matplotlib/jupyter-matplotlib/blob/ce9cc91e52065d33e57c3265282640f2aa44e08f/jupyter-matplotlib.json>`__.   The logic to ship the JS tarball and server extension
+enabler is in `setup.py <https://github.com/matplotlib/jupyter-matplotlib/blob/ce9cc91e52065d33e57c3265282640f2aa44e08f/setup.py>`__.  Note that the ``setup.py``
+file has additional logic to automatically create the JS tarball as part of the
+release process, but this could also be done manually.
+
+Technically, a package that contains only a JupyterLab extension could be created
+and published on ``conda-forge``, but it would not be discoverable by the JupyterLab
+extension manager.

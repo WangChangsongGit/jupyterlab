@@ -63,7 +63,7 @@ new environment named ``jupyterlab-ext``.
 
 .. code:: bash
 
-    conda create -n jupyterlab-ext -c conda-forge --override-channels jupyterlab cookiecutter nodejs git
+    conda create -n jupyterlab-ext --override-channels --strict-channel-priority -c conda-forge -c anaconda jupyterlab cookiecutter nodejs git
 
 Now activate the new environment so that all further commands you run
 work out of that environment.
@@ -75,6 +75,13 @@ work out of that environment.
 Note: You'll need to run the command above in each new terminal you open
 before you can work with the tools you installed in the
 ``jupyterlab-ext`` environment.
+
+Note: if you have an older version of JupyterLab previously installed, you may need to update
+the version of JupyterLab manually.
+
+.. code:: bash
+
+    conda install -c conda-forge jupyterlab=1
 
 Create a repository
 ~~~~~~~~~~~~~~~~~~~
@@ -222,15 +229,6 @@ a reference to the command palette interface and the Jupyter front end.
       ICommandPalette
     } from '@jupyterlab/apputils';
 
-You will also need to install these dependencies. Run the following commands in the
-repository root folder install the dependency and save it to your
-`package.json`:
-
-.. code:: bash
-
-    jlpm add @jupyterlab/apputils
-    jlpm add @jupyterlab/application
-
 Locate the ``extension`` object of type ``JupyterFrontEndPlugin``. Change the
 definition so that it reads like so:
 
@@ -257,7 +255,16 @@ will pass an instance of ``ICommandPalette`` as the second parameter of
 in that function. The second ``console.log`` line exists only so that
 you can immediately check that your changes work.
 
-Run the following to rebuild your extension.
+Now you will need to install these dependencies. Run the following commands in the
+repository root folder to install the dependencies and save them to your
+`package.json`:
+
+.. code:: bash
+
+    jlpm add @jupyterlab/apputils
+    jlpm add @jupyterlab/application
+
+Finally, run the following to rebuild your extension.
 
 .. code:: bash
 
@@ -605,7 +612,7 @@ file.
       constructor() {
         super();
 
-        this.addClass('my-apodWidget'); // new line
+        this.addClass('my-apodWidget');
 
         // Add an image element to the panel
         this.img = document.createElement('img');
@@ -657,6 +664,17 @@ file.
           this.summary.innerText = 'Random APOD fetched was not an image.';
         }
       }
+
+      /**
+      * Get a random date string in YYYY-MM-DD format.
+      */
+      randomDate(): string {
+        const start = new Date(2010, 1, 1);
+        const end = new Date();
+        const randomDate = new Date(start.getTime() + Math.random()*(end.getTime() - start.getTime()));
+        return randomDate.toISOString().slice(0, 10);
+      }
+    }
 
 You've written all of the code before. All you've done is restructure it
 to use instance variables and move the image request to its own

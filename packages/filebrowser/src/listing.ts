@@ -10,39 +10,42 @@ import {
 
 import { PathExt, Time } from '@jupyterlab/coreutils';
 
-import { DocumentRegistry } from '@jupyterlab/docregistry';
-
 import {
   IDocumentManager,
   isValidFileName,
   renameFile
 } from '@jupyterlab/docmanager';
 
+import { DocumentRegistry } from '@jupyterlab/docregistry';
+
 import { Contents } from '@jupyterlab/services';
+
+import { IIconRegistry } from '@jupyterlab/ui-components';
 
 import {
   ArrayExt,
   ArrayIterator,
-  IIterator,
   each,
   filter,
   find,
+  IIterator,
   map,
   toArray
 } from '@phosphor/algorithm';
 
 import { MimeData, PromiseDelegate } from '@phosphor/coreutils';
 
-import { Drag, IDragEvent } from '@phosphor/dragdrop';
-
 import { ElementExt } from '@phosphor/domutils';
 
+import { Drag, IDragEvent } from '@phosphor/dragdrop';
+
 import { Message, MessageLoop } from '@phosphor/messaging';
+
+import { ISignal, Signal } from '@phosphor/signaling';
 
 import { Widget } from '@phosphor/widgets';
 
 import { FileBrowserModel } from './model';
-import { ISignal, Signal } from '@phosphor/signaling';
 
 /**
  * The class name added to DirListing widget.
@@ -110,9 +113,14 @@ const NAME_ID_CLASS = 'jp-id-name';
 const MODIFIED_ID_CLASS = 'jp-id-modified';
 
 /**
- * The mime type for a con tents drag object.
+ * The mime type for a contents drag object.
  */
 const CONTENTS_MIME = 'application/x-jupyter-icontents';
+
+/**
+ * The mime type for a rich contents drag object.
+ */
+const CONTENTS_MIME_RICH = 'application/x-jupyter-icontentsrich';
 
 /**
  * The class name added to drop targets.
@@ -185,7 +193,9 @@ export class DirListing extends Widget {
    */
   constructor(options: DirListing.IOptions) {
     super({
-      node: (options.renderer || DirListing.defaultRenderer).createNode()
+      node: (options.renderer =
+        options.renderer ||
+        new DirListing.Renderer(options.model.iconRegistry)).createNode()
     });
     this.addClass(DIR_LISTING_CLASS);
     this._model = options.model;
@@ -195,7 +205,7 @@ export class DirListing extends Widget {
     this._editNode = document.createElement('input');
     this._editNode.className = EDITOR_CLASS;
     this._manager = this._model.manager;
-    this._renderer = options.renderer || DirListing.defaultRenderer;
+    this._renderer = options.renderer;
 
     const headerNode = DOMUtils.findElement(this.node, HEADER_CLASS);
     this._renderer.populateHeaderNode(headerNode);
@@ -364,29 +374,27 @@ export class DirListing extends Widget {
    *
    * @returns A promise that resolves when the operation is complete.
    */
-  delete(): Promise<void> {
-    let names: string[] = [];
-    each(this._sortedItems, item => {
-      if (this._selection[item.name]) {
-        names.push(item.name);
-      }
+  async delete(): Promise<void> {
+    const items = this._sortedItems.filter(item => this._selection[item.name]);
+
+    if (!items.length) {
+      return;
+    }
+
+    const message =
+      items.length === 1
+        ? `Are you sure you want to permanently delete: ${items[0].name}?`
+        : `Are you sure you want to permanently delete the ${items.length} ` +
+          `files/folders selected?`;
+    const result = await showDialog({
+      title: 'Delete',
+      body: message,
+      buttons: [Dialog.cancelButton(), Dialog.warnButton({ label: 'Delete' })]
     });
-    let message = `Are you sure you want to permanently delete the ${names.length} files/folders selected?`;
-    if (names.length === 1) {
-      message = `Are you sure you want to permanently delete: ${names[0]}?`;
+
+    if (!this.isDisposed && result.button.accept) {
+      await this._delete(items.map(item => item.path));
     }
-    if (names.length) {
-      return showDialog({
-        title: 'Delete',
-        body: message,
-        buttons: [Dialog.cancelButton(), Dialog.warnButton({ label: 'Delete' })]
-      }).then(result => {
-        if (!this.isDisposed && result.button.accept) {
-          return this._delete(names);
-        }
-      });
-    }
-    return Promise.resolve(void 0);
   }
 
   /**
@@ -922,8 +930,9 @@ export class DirListing extends Widget {
   private _handleOpen(item: Contents.IModel): void {
     this._onItemOpened.emit(item);
     if (item.type === 'directory') {
+      const localPath = this._manager.services.contents.localPath(item.path);
       this._model
-        .cd(item.name)
+        .cd(`/${localPath}`)
         .catch(error => showErrorMessage('Open directory', error));
     } else {
       let path = item.path;
@@ -1151,15 +1160,18 @@ export class DirListing extends Widget {
     let selectedNames = Object.keys(this._selection);
     let source = this._items[index];
     let items = this._sortedItems;
+    let selectedItems: Contents.IModel[];
     let item: Contents.IModel | undefined;
 
     // If the source node is not selected, use just that node.
     if (!source.classList.contains(SELECTED_CLASS)) {
       item = items[index];
       selectedNames = [item.name];
+      selectedItems = [item];
     } else {
       let name = selectedNames[0];
       item = find(items, value => value.name === name);
+      selectedItems = toArray(this.selectedItems());
     }
 
     if (!item) {
@@ -1182,12 +1194,28 @@ export class DirListing extends Widget {
       proposedAction: 'move'
     });
     let basePath = this._model.path;
+
     let paths = toArray(
       map(selectedNames, name => {
         return PathExt.join(basePath, name);
       })
     );
     this._drag.mimeData.setData(CONTENTS_MIME, paths);
+
+    // Add thunks for getting mime data content.
+    // We thunk the content so we don't try to make a network call
+    // when it's not needed. E.g. just moving files around
+    // in a filebrowser
+    let services = this.model.manager.services;
+    for (const item of selectedItems) {
+      this._drag.mimeData.setData(CONTENTS_MIME_RICH, {
+        model: item,
+        withContent: async () => {
+          return await services.contents.get(item.path);
+        }
+      } as DirListing.IContentsThunk);
+    }
+
     if (item && item.type !== 'directory') {
       const otherPaths = paths.slice(1).reverse();
       this._drag.mimeData.setData(FACTORY_MIME, () => {
@@ -1328,19 +1356,16 @@ export class DirListing extends Widget {
   }
 
   /**
-   * Delete the files with the given names.
+   * Delete the files with the given paths.
    */
-  private _delete(names: string[]): Promise<void> {
-    const promises: Promise<void>[] = [];
-    const basePath = this._model.path;
-    for (let name of names) {
-      let newPath = PathExt.join(basePath, name);
-      let promise = this._model.manager.deleteFile(newPath).catch(err => {
-        void showErrorMessage('Delete Failed', err);
-      });
-      promises.push(promise);
-    }
-    return Promise.all(promises).then(() => undefined);
+  private async _delete(paths: string[]): Promise<void> {
+    await Promise.all(
+      paths.map(path =>
+        this._model.manager.deleteFile(path).catch(err => {
+          void showErrorMessage('Delete Failed', err);
+        })
+      )
+    );
   }
 
   /**
@@ -1562,6 +1587,25 @@ export namespace DirListing {
   }
 
   /**
+   * A file contents model thunk.
+   *
+   * Note: The content of the model will be empty.
+   * To get the contents, call and await the `withContent`
+   * method.
+   */
+  export interface IContentsThunk {
+    /**
+     * The contents model.
+     */
+    model: Contents.IModel;
+
+    /**
+     * Fetches the model with contents.
+     */
+    withContent: () => Promise<Contents.IModel>;
+  }
+
+  /**
    * The render interface for file browser listing options.
    */
   export interface IRenderer {
@@ -1641,6 +1685,10 @@ export namespace DirListing {
    * The default implementation of an `IRenderer`.
    */
   export class Renderer implements IRenderer {
+    constructor(icoReg: IIconRegistry) {
+      this._iconRegistry = icoReg;
+    }
+
     /**
      * Create the DOM node for a dir listing.
      */
@@ -1760,11 +1808,30 @@ export namespace DirListing {
       let modified = DOMUtils.findElement(node, ITEM_MODIFIED_CLASS);
 
       if (fileType) {
-        icon.textContent = fileType.iconLabel || '';
-        icon.className = `${ITEM_ICON_CLASS} ${fileType.iconClass || ''}`;
+        // TODO: remove workaround if...else/code in else clause in v2.0.0
+        // workaround for 1.0.x versions of Jlab pulling in 1.1.x versions of filebrowser
+        if (this._iconRegistry) {
+          // add icon as svg node. Can be styled using CSS
+          this._iconRegistry.icon({
+            name: fileType.iconClass,
+            className: ITEM_ICON_CLASS,
+            title: fileType.iconLabel,
+            fallback: true,
+            container: icon,
+            center: true,
+            kind: 'listing'
+          });
+        } else {
+          // add icon as CSS background image. Can't be styled using CSS
+          icon.className = `${ITEM_ICON_CLASS} ${fileType.iconClass || ''}`;
+          icon.textContent = fileType.iconLabel || '';
+        }
       } else {
-        icon.textContent = '';
+        // use default icon as CSS background image
         icon.className = ITEM_ICON_CLASS;
+        icon.textContent = '';
+        // clean up the svg icon annotation, if any
+        delete icon.dataset.icon;
       }
 
       node.title = model.name;
@@ -1846,12 +1913,8 @@ export namespace DirListing {
       node.appendChild(icon);
       return node;
     }
+    _iconRegistry: IIconRegistry;
   }
-
-  /**
-   * The default `IRenderer` instance.
-   */
-  export const defaultRenderer = new Renderer();
 }
 
 /**
