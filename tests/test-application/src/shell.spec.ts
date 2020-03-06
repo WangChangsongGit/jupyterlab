@@ -5,9 +5,11 @@ import { expect } from 'chai';
 
 import { framePromise } from '@jupyterlab/testutils';
 
-import { Message } from '@phosphor/messaging';
+import { toArray } from '@lumino/algorithm';
 
-import { Widget } from '@phosphor/widgets';
+import { Message } from '@lumino/messaging';
+
+import { Widget } from '@lumino/widgets';
 
 import { simulate } from 'simulate-event';
 
@@ -165,6 +167,16 @@ describe('LabShell', () => {
       widget.id = 'foo';
       shell.add(widget, 'top', { rank: 10 });
       expect(shell.isEmpty('top')).to.equal(false);
+    });
+
+    it('should add widgets according to their ranks', () => {
+      const foo = new Widget();
+      const bar = new Widget();
+      foo.id = 'foo';
+      bar.id = 'bar';
+      shell.add(foo, 'top', { rank: 20 });
+      shell.add(bar, 'top', { rank: 10 });
+      expect(toArray(shell.widgets('top'))).to.deep.equal([bar, foo]);
     });
   });
 
@@ -381,8 +393,8 @@ describe('LabShell', () => {
       shell.add(foo, 'main');
       const state = shell.saveLayout();
       shell.activateById('foo');
-      expect(state.mainArea.mode).to.equal('multiple-document');
-      expect(state.mainArea.currentWidget).to.equal(null);
+      expect(state.mainArea?.mode).to.equal('multiple-document');
+      expect(state.mainArea?.currentWidget).to.equal(null);
     });
   });
 
@@ -391,7 +403,7 @@ describe('LabShell', () => {
       const state = shell.saveLayout();
       shell.mode = 'single-document';
       shell.restoreLayout(state);
-      expect(state.mainArea.mode).to.equal('multiple-document');
+      expect(state.mainArea?.mode).to.equal('multiple-document');
     });
   });
 });

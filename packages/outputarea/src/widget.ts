@@ -4,22 +4,23 @@
 import {
   JSONObject,
   PromiseDelegate,
-  ReadonlyJSONObject
-} from '@phosphor/coreutils';
+  ReadonlyJSONObject,
+  ReadonlyPartialJSONObject
+} from '@lumino/coreutils';
 
-import { Message } from '@phosphor/messaging';
+import { Message } from '@lumino/messaging';
 
-import { AttachedProperty } from '@phosphor/properties';
+import { AttachedProperty } from '@lumino/properties';
 
-import { Signal } from '@phosphor/signaling';
+import { Signal } from '@lumino/signaling';
 
-import { Panel, PanelLayout } from '@phosphor/widgets';
+import { Panel, PanelLayout } from '@lumino/widgets';
 
-import { Widget } from '@phosphor/widgets';
+import { Widget } from '@lumino/widgets';
 
-import { IClientSession } from '@jupyterlab/apputils';
+import { ISessionContext } from '@jupyterlab/apputils';
 
-import { nbformat } from '@jupyterlab/coreutils';
+import * as nbformat from '@jupyterlab/nbformat';
 
 import { IOutputModel, IRenderMimeRegistry } from '@jupyterlab/rendermime';
 
@@ -149,7 +150,7 @@ export class OutputArea extends Widget {
   get future(): Kernel.IShellFuture<
     KernelMessage.IExecuteRequestMsg,
     KernelMessage.IExecuteReplyMsg
-  > | null {
+  > {
     return this._future;
   }
 
@@ -157,7 +158,7 @@ export class OutputArea extends Widget {
     value: Kernel.IShellFuture<
       KernelMessage.IExecuteRequestMsg,
       KernelMessage.IExecuteReplyMsg
-    > | null
+    >
   ) {
     // Bail if the model is disposed.
     if (this.model.isDisposed) {
@@ -199,8 +200,8 @@ export class OutputArea extends Widget {
   dispose(): void {
     if (this._future) {
       this._future.dispose();
+      this._future = null!;
     }
-    this._future = null;
     this._displayIdMap.clear();
     super.dispose();
   }
@@ -218,9 +219,30 @@ export class OutputArea extends Widget {
         this.outputLengthChanged.emit(this.model.length);
         break;
       case 'remove':
-        // Only clear is supported by the model.
         if (this.widgets.length) {
-          this._clear();
+          // all items removed from model
+          if (this.model.length === 0) {
+            this._clear();
+          } else {
+            // range of items removed from model
+            // remove widgets corresponding to removed model items
+            const startIndex = args.oldIndex;
+            for (
+              let i = 0;
+              i < args.oldValues.length && startIndex < this.widgets.length;
+              ++i
+            ) {
+              let widget = this.widgets[startIndex];
+              widget.parent = null;
+              widget.dispose();
+            }
+
+            // apply item offset to target model item indices in _displayIdMap
+            this._moveDisplayIdIndices(startIndex, args.oldValues.length);
+
+            // prevent jitter caused by immediate height change
+            this._preventHeightChangeJitter();
+          }
           this.outputLengthChanged.emit(this.model.length);
         }
         break;
@@ -231,6 +253,32 @@ export class OutputArea extends Widget {
       default:
         break;
     }
+  }
+
+  /**
+   * Update indices in _displayIdMap in response to element remove from model items
+   * *
+   * @param startIndex - The index of first element removed
+   *
+   * @param count - The number of elements removed from model items
+   *
+   */
+  private _moveDisplayIdIndices(startIndex: number, count: number) {
+    this._displayIdMap.forEach((indices: number[]) => {
+      const rangeEnd = startIndex + count;
+      const numIndices = indices.length;
+      // reverse loop in order to prevent removing element affecting the index
+      for (let i = numIndices - 1; i >= 0; --i) {
+        const index = indices[i];
+        // remove model item indices in removed range
+        if (index >= startIndex && index < rangeEnd) {
+          indices.splice(i, 1);
+        } else if (index >= rangeEnd) {
+          // move model item indices that were larger than range end
+          indices[i] -= count;
+        }
+      }
+    });
   }
 
   /**
@@ -263,6 +311,11 @@ export class OutputArea extends Widget {
     // Clear the display id map.
     this._displayIdMap.clear();
 
+    // prevent jitter caused by immediate height change
+    this._preventHeightChangeJitter();
+  }
+
+  private _preventHeightChangeJitter() {
     // When an output area is cleared and then quickly replaced with new
     // content (as happens with @interact in widgets, for example), the
     // quickly changing height can make the page jitter.
@@ -271,7 +324,7 @@ export class OutputArea extends Widget {
     let rect = this.node.getBoundingClientRect();
     this.node.style.minHeight = `${rect.height}px`;
     if (this._minHeightTimeout) {
-      clearTimeout(this._minHeightTimeout);
+      window.clearTimeout(this._minHeightTimeout);
     }
     this._minHeightTimeout = window.setTimeout(() => {
       if (this.isDisposed) {
@@ -368,6 +421,9 @@ export class OutputArea extends Widget {
 
   /**
    * Create an output item with a prompt and actual output
+   *
+   * @returns a rendered widget, or null if we cannot render
+   * #### Notes
    */
   protected createOutputItem(model: IOutputModel): Widget | null {
     let output = this.createRenderedMimetype(model);
@@ -415,7 +471,7 @@ export class OutputArea extends Widget {
       output.node.appendChild(pre);
 
       // Remove mime-type-specific CSS classes
-      output.node.className = 'p-Widget jp-RenderedText';
+      output.node.className = 'lm-Widget jp-RenderedText';
       output.node.setAttribute(
         'data-mime-type',
         'application/vnd.jupyter.stderr'
@@ -433,15 +489,14 @@ export class OutputArea extends Widget {
     let output: nbformat.IOutput;
     let transient = ((msg.content as any).transient || {}) as JSONObject;
     let displayId = transient['display_id'] as string;
-    let targets: number[];
+    let targets: number[] | undefined;
 
     switch (msgType) {
       case 'execute_result':
       case 'display_data':
       case 'stream':
       case 'error':
-        output = msg.content as nbformat.IOutput;
-        output.output_type = msgType as nbformat.OutputType;
+        output = { ...msg.content, output_type: msgType };
         model.add(output);
         break;
       case 'clear_output':
@@ -449,8 +504,7 @@ export class OutputArea extends Widget {
         model.clear(wait);
         break;
       case 'update_display_data':
-        output = msg.content as nbformat.IOutput;
-        output.output_type = 'display_data';
+        output = { ...msg.content, output_type: 'display_data' };
         targets = this._displayIdMap.get(displayId);
         if (targets) {
           for (let index of targets) {
@@ -497,11 +551,11 @@ export class OutputArea extends Widget {
     model.add(output);
   };
 
-  private _minHeightTimeout: number = null;
+  private _minHeightTimeout: number | null = null;
   private _future: Kernel.IShellFuture<
     KernelMessage.IExecuteRequestMsg,
     KernelMessage.IExecuteReplyMsg
-  > | null = null;
+  >;
   private _displayIdMap = new Map<string, number[]>();
 }
 
@@ -558,9 +612,9 @@ export namespace OutputArea {
   export async function execute(
     code: string,
     output: OutputArea,
-    session: IClientSession,
+    sessionContext: ISessionContext,
     metadata?: JSONObject
-  ): Promise<KernelMessage.IExecuteReplyMsg> {
+  ): Promise<KernelMessage.IExecuteReplyMsg | undefined> {
     // Override the default for `stop_on_error`.
     let stopOnError = true;
     if (
@@ -575,17 +629,18 @@ export namespace OutputArea {
       stop_on_error: stopOnError
     };
 
-    if (!session.kernel) {
+    const kernel = sessionContext.session?.kernel;
+    if (!kernel) {
       throw new Error('Session has no kernel.');
     }
-    let future = session.kernel.requestExecute(content, false, metadata);
+    let future = kernel.requestExecute(content, false, metadata);
     output.future = future;
     return future.done;
   }
 
   export function isIsolated(
     mimeType: string,
-    metadata: ReadonlyJSONObject
+    metadata: ReadonlyPartialJSONObject
   ): boolean {
     let mimeMd = metadata[mimeType] as ReadonlyJSONObject | undefined;
     // mime-specific higher priority
@@ -774,8 +829,8 @@ export class Stdin extends Widget implements IStdin {
     this._input.removeEventListener('keydown', this);
   }
 
-  private _future: Kernel.IShellFuture = null;
-  private _input: HTMLInputElement = null;
+  private _future: Kernel.IShellFuture;
+  private _input: HTMLInputElement;
   private _value: string;
   private _promise = new PromiseDelegate<void>();
 }
@@ -855,16 +910,16 @@ namespace Private {
         // Workaround needed by Firefox, to properly render svg inside
         // iframes, see https://stackoverflow.com/questions/10177190/
         // svg-dynamically-added-to-iframe-does-not-render-correctly
-        iframe.contentDocument.open();
+        iframe.contentDocument!.open();
 
         // Insert the subarea into the iframe
         // We must directly write the html. At this point, subarea doesn't
         // contain any user content.
-        iframe.contentDocument.write(this._wrapped.node.innerHTML);
+        iframe.contentDocument!.write(this._wrapped.node.innerHTML);
 
-        iframe.contentDocument.close();
+        iframe.contentDocument!.close();
 
-        let body = iframe.contentDocument.body;
+        let body = iframe.contentDocument!.body;
 
         // Adjust the iframe height automatically
         iframe.style.height = body.scrollHeight + 'px';

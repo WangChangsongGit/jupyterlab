@@ -5,27 +5,25 @@
 
 import CodeMirror from 'codemirror';
 
-import { JSONExt } from '@phosphor/coreutils';
-
-import { ArrayExt } from '@phosphor/algorithm';
-
-import { IDisposable, DisposableDelegate } from '@phosphor/disposable';
-
-import { Signal } from '@phosphor/signaling';
-
 import { showDialog } from '@jupyterlab/apputils';
 
-import { Poll } from '@jupyterlab/coreutils';
-
 import { CodeEditor } from '@jupyterlab/codeeditor';
-
-import { UUID } from '@phosphor/coreutils';
 
 import {
   IObservableMap,
   IObservableString,
   ICollaborator
 } from '@jupyterlab/observables';
+
+import { ArrayExt } from '@lumino/algorithm';
+
+import { JSONExt, UUID } from '@lumino/coreutils';
+
+import { Poll } from '@lumino/polling';
+
+import { IDisposable, DisposableDelegate } from '@lumino/disposable';
+
+import { Signal } from '@lumino/signaling';
 
 import { Mode } from './mode';
 
@@ -598,7 +596,7 @@ export class CodeMirrorEditor implements CodeEditor.IEditor {
     return {
       offset: this.getOffsetAt({ column: token.start, line: cursor.line }),
       value: token.string,
-      type: token.type
+      type: token.type ?? undefined
     };
   }
 
@@ -678,7 +676,7 @@ export class CodeMirrorEditor implements CodeEditor.IEditor {
     // TODO: should we provide a hook for when the
     // mode is done being set?
     void Mode.ensure(mime).then(spec => {
-      editor.setOption('mode', spec.mime);
+      editor.setOption('mode', spec?.mime ?? 'null');
     });
     let extraKeys = editor.getOption('extraKeys') || {};
     const isCode = mime !== 'text/plain' && mime !== 'text/x-ipythongfm';
@@ -1238,7 +1236,7 @@ export namespace CodeMirrorEditor {
   /**
    * The default configuration options for an editor.
    */
-  export let defaultConfig: IConfig = {
+  export let defaultConfig: Required<IConfig> = {
     ...CodeEditor.defaultConfig,
     mode: 'null',
     theme: 'jupyter',
@@ -1361,31 +1359,38 @@ namespace Private {
    */
   export function delSpaceToPrevTabStop(cm: CodeMirror.Editor): void {
     let doc = cm.getDoc();
-    let from = doc.getCursor('from');
-    let to = doc.getCursor('to');
-    let sel = !posEq(from, to);
-    if (sel) {
-      let ranges = doc.listSelections();
-      for (let i = ranges.length - 1; i >= 0; i--) {
-        let head = ranges[i].head;
-        let anchor = ranges[i].anchor;
-        doc.replaceRange(
-          '',
-          CodeMirror.Pos(head.line, head.ch),
-          CodeMirror.Pos(anchor.line, anchor.ch)
-        );
+    let tabSize = cm.getOption('indentUnit');
+    let ranges = doc.listSelections(); // handle multicursor
+    for (let i = ranges.length - 1; i >= 0; i--) {
+      // iterate reverse so any deletions don't overlap
+      let head = ranges[i].head;
+      let anchor = ranges[i].anchor;
+      let isSelection = !posEq(head, anchor);
+      if (isSelection) {
+        doc.replaceRange('', anchor, head);
+      } else {
+        let line = doc.getLine(head.line).substring(0, head.ch);
+        if (line.match(/^\ +$/) !== null) {
+          // delete tabs
+          let prevTabStop = (Math.ceil(head.ch / tabSize) - 1) * tabSize;
+          let from = CodeMirror.Pos(head.line, prevTabStop);
+          doc.replaceRange('', from, head);
+        } else {
+          // delete non-tabs
+          if (head.ch === 0) {
+            if (head.line !== 0) {
+              let from = CodeMirror.Pos(
+                head.line - 1,
+                doc.getLine(head.line - 1).length
+              );
+              doc.replaceRange('', from, head);
+            }
+          } else {
+            let from = CodeMirror.Pos(head.line, head.ch - 1);
+            doc.replaceRange('', from, head);
+          }
+        }
       }
-      return;
-    }
-    let cur = doc.getCursor();
-    let tabsize = cm.getOption('indentUnit');
-    let chToPrevTabStop = cur.ch - (Math.ceil(cur.ch / tabsize) - 1) * tabsize;
-    from = { ch: cur.ch - chToPrevTabStop, line: cur.line };
-    let select = doc.getRange(from, cur);
-    if (select.match(/^\ +$/) !== null) {
-      doc.replaceRange('', from, cur);
-    } else {
-      CodeMirror.commands['delCharBefore'](cm);
     }
   }
 
@@ -1433,8 +1438,8 @@ namespace Private {
           value === 'bounded' ? `${config.wordWrapColumn}ch` : null;
         const width =
           value === 'wordWrapColumn' ? `${config.wordWrapColumn}ch` : null;
-        lines.style.maxWidth = maxWidth;
-        lines.style.width = width;
+        lines.style.setProperty('max-width', maxWidth);
+        lines.style.setProperty('width', width);
         editor.setOption('lineWrapping', lineWrapping);
         break;
       case 'wordWrapColumn':
@@ -1474,7 +1479,7 @@ namespace Private {
         el.style.fontFamily = value;
         break;
       case 'fontSize':
-        el.style.fontSize = value ? value + 'px' : null;
+        el.style.setProperty('font-size', value ? value + 'px' : null);
         break;
       case 'lineHeight':
         el.style.lineHeight = value ? value.toString() : null;

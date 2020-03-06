@@ -1,25 +1,25 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { each, zip } from '@phosphor/algorithm';
+import { each, zip } from '@lumino/algorithm';
 
-import { Message } from '@phosphor/messaging';
+import { Message } from '@lumino/messaging';
 
-import { ISignal, Signal } from '@phosphor/signaling';
+import { ISignal, Signal } from '@lumino/signaling';
 
-import { Widget } from '@phosphor/widgets';
+import { Widget } from '@lumino/widgets';
 
 import { Styling } from '@jupyterlab/apputils';
 
 /**
  * The supported parsing delimiters.
  */
-const DELIMITERS = [',', ';', '\t', '|'];
+const DELIMITERS = [',', ';', '\t', '|', '#'];
 
 /**
  * The labels for each delimiter as they appear in the dropdown menu.
  */
-const LABELS = [',', ';', 'tab', 'pipe'];
+const LABELS = [',', ';', 'tab', 'pipe', 'hash'];
 
 /**
  * The class name added to a csv toolbar widget.

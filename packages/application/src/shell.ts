@@ -1,19 +1,19 @@
 // Copyright (c) Jupyter Development Team.
 // Distributed under the terms of the Modified BSD License.
 
-import { Debouncer } from '@jupyterlab/coreutils';
-
 import { DocumentRegistry } from '@jupyterlab/docregistry';
 
-import { DockPanelSvg, TabBarSvg } from '@jupyterlab/ui-components';
+import { classes, DockPanelSvg, LabIcon } from '@jupyterlab/ui-components';
 
-import { ArrayExt, find, IIterator, iter, toArray } from '@phosphor/algorithm';
+import { ArrayExt, find, IIterator, iter, toArray } from '@lumino/algorithm';
 
-import { PromiseDelegate, Token } from '@phosphor/coreutils';
+import { PromiseDelegate, Token } from '@lumino/coreutils';
 
-import { Message, MessageLoop, IMessageHandler } from '@phosphor/messaging';
+import { Message, MessageLoop, IMessageHandler } from '@lumino/messaging';
 
-import { ISignal, Signal } from '@phosphor/signaling';
+import { Debouncer } from '@lumino/polling';
+
+import { ISignal, Signal } from '@lumino/signaling';
 
 import {
   BoxLayout,
@@ -27,7 +27,7 @@ import {
   TabBar,
   Title,
   Widget
-} from '@phosphor/widgets';
+} from '@lumino/widgets';
 
 import { JupyterFrontEnd } from './frontend';
 
@@ -175,28 +175,24 @@ export class LabShell extends Widget implements JupyterFrontEnd.IShell {
     this.addClass(APPLICATION_SHELL_CLASS);
     this.id = 'main';
 
-    let bottomPanel = (this._bottomPanel = new BoxPanel());
-    let topPanel = (this._topPanel = new Panel());
-    let hboxPanel = new BoxPanel();
-    let dockPanel = (this._dockPanel = new DockPanelSvg({
-      kind: 'dockPanelBar'
-    }));
     let headerPanel = (this._headerPanel = new Panel());
+    let topHandler = (this._topHandler = new Private.PanelHandler());
+    let bottomPanel = (this._bottomPanel = new BoxPanel());
+    let hboxPanel = new BoxPanel();
+    let dockPanel = (this._dockPanel = new DockPanelSvg());
     MessageLoop.installMessageHook(dockPanel, this._dockChildHook);
 
     let hsplitPanel = new SplitPanel();
-    let leftHandler = (this._leftHandler = new Private.SideBarHandler('left'));
-    let rightHandler = (this._rightHandler = new Private.SideBarHandler(
-      'right'
-    ));
+    let leftHandler = (this._leftHandler = new Private.SideBarHandler());
+    let rightHandler = (this._rightHandler = new Private.SideBarHandler());
     let rootLayout = new BoxLayout();
 
+    headerPanel.id = 'jp-header-panel';
+    topHandler.panel.id = 'jp-top-panel';
     bottomPanel.id = 'jp-bottom-panel';
-    topPanel.id = 'jp-top-panel';
     hboxPanel.id = 'jp-main-content-panel';
     dockPanel.id = 'jp-main-dock-panel';
     hsplitPanel.id = 'jp-main-split-panel';
-    headerPanel.id = 'jp-header-panel';
 
     leftHandler.sideBar.addClass(SIDEBAR_CLASS);
     leftHandler.sideBar.addClass('jp-mod-left');
@@ -206,13 +202,13 @@ export class LabShell extends Widget implements JupyterFrontEnd.IShell {
     rightHandler.sideBar.addClass('jp-mod-right');
     rightHandler.stackedPanel.id = 'jp-right-stack';
 
-    bottomPanel.direction = 'bottom-to-top';
     hboxPanel.spacing = 0;
     dockPanel.spacing = 5;
     hsplitPanel.spacing = 1;
 
     hboxPanel.direction = 'left-to-right';
     hsplitPanel.orientation = 'horizontal';
+    bottomPanel.direction = 'bottom-to-top';
 
     SplitPanel.setStretch(leftHandler.stackedPanel, 0);
     SplitPanel.setStretch(dockPanel, 1);
@@ -238,12 +234,12 @@ export class LabShell extends Widget implements JupyterFrontEnd.IShell {
     hsplitPanel.setRelativeSizes([1, 2.5, 1]);
 
     BoxLayout.setStretch(headerPanel, 0);
-    BoxLayout.setStretch(topPanel, 0);
+    BoxLayout.setStretch(topHandler.panel, 0);
     BoxLayout.setStretch(hboxPanel, 1);
     BoxLayout.setStretch(bottomPanel, 0);
 
     rootLayout.addWidget(headerPanel);
-    rootLayout.addWidget(topPanel);
+    rootLayout.addWidget(topHandler.panel);
     rootLayout.addWidget(hboxPanel);
     rootLayout.addWidget(bottomPanel);
 
@@ -501,6 +497,30 @@ export class LabShell extends Widget implements JupyterFrontEnd.IShell {
     }
   }
 
+  /*
+   * Activate the next TabBar.
+   */
+  activateNextTabBar(): void {
+    let nextBar = this._adjacentBar('next');
+    if (nextBar) {
+      if (nextBar.currentTitle) {
+        nextBar.currentTitle.owner.activate();
+      }
+    }
+  }
+
+  /*
+   * Activate the next TabBar.
+   */
+  activatePreviousTabBar(): void {
+    let nextBar = this._adjacentBar('previous');
+    if (nextBar) {
+      if (nextBar.currentTitle) {
+        nextBar.currentTitle.owner.activate();
+      }
+    }
+  }
+
   add(
     widget: Widget,
     area: ILabShell.Area = 'main',
@@ -597,7 +617,7 @@ export class LabShell extends Widget implements JupyterFrontEnd.IShell {
       case 'header':
         return this._headerPanel.widgets.length === 0;
       case 'top':
-        return this._topPanel.widgets.length === 0;
+        return this._topHandler.panel.widgets.length === 0;
       case 'bottom':
         return this._bottomPanel.widgets.length === 0;
       case 'right':
@@ -681,7 +701,7 @@ export class LabShell extends Widget implements JupyterFrontEnd.IShell {
       case 'header':
         return this._headerPanel.children();
       case 'top':
-        return this._topPanel.children();
+        return this._topHandler.panel.children();
       case 'bottom':
         return this._bottomPanel.children();
       default:
@@ -744,12 +764,23 @@ export class LabShell extends Widget implements JupyterFrontEnd.IShell {
     let ref: Widget | null = this.currentWidget;
 
     if (options.ref) {
-      ref = find(dock.widgets(), value => value.id === options.ref!) || null;
+      ref = find(dock.widgets(), value => value.id === options!.ref!) || null;
     }
 
+    const { title } = widget;
     // Add widget ID to tab so that we can get a handle on the tab's widget
     // (for context menu support)
-    widget.title.dataset = { ...widget.title.dataset, id: widget.id };
+    title.dataset = { ...title.dataset, id: widget.id };
+
+    if (title.icon instanceof LabIcon) {
+      // bind an appropriate style to the icon
+      title.icon = title.icon.bindprops({
+        stylesheet: 'mainAreaTab'
+      });
+    } else if (typeof title.icon === 'string' || !title.icon) {
+      // add some classes to help with displaying css background imgs
+      title.iconClass = classes(title.iconClass, 'jp-Icon');
+    }
 
     dock.addWidget(widget, { mode, ref });
 
@@ -803,9 +834,13 @@ export class LabShell extends Widget implements JupyterFrontEnd.IShell {
       console.error('Widgets added to app shell must have unique id property.');
       return;
     }
-    // Temporary: widgets are added to the panel in order of insertion.
-    this._topPanel.addWidget(widget);
+    options = options || {};
+    const rank = options.rank ?? DEFAULT_RANK;
+    this._topHandler.addWidget(widget, rank);
     this._onLayoutModified();
+    if (this._topHandler.panel.isHidden) {
+      this._topHandler.panel.show();
+    }
   }
 
   /**
@@ -974,7 +1009,7 @@ export class LabShell extends Widget implements JupyterFrontEnd.IShell {
   private _rightHandler: Private.SideBarHandler;
   private _tracker = new FocusTracker<Widget>();
   private _headerPanel: Panel;
-  private _topPanel: Panel;
+  private _topHandler: Private.PanelHandler;
   private _bottomPanel: Panel;
   private _mainOptionsCache = new Map<Widget, DocumentRegistry.IOpenOptions>();
   private _sideOptionsCache = new Map<Widget, DocumentRegistry.IOpenOptions>();
@@ -1025,15 +1060,42 @@ namespace Private {
   }
 
   /**
+   * A class which manages a panel and sorts its widgets by rank.
+   */
+  export class PanelHandler {
+    /**
+     * Get the panel managed by the handler.
+     */
+    get panel() {
+      return this._panel;
+    }
+
+    /**
+     * Add a widget to the panel.
+     *
+     * If the widget is already added, it will be moved.
+     */
+    addWidget(widget: Widget, rank: number): void {
+      widget.parent = null;
+      const item = { widget, rank };
+      const index = ArrayExt.upperBound(this._items, item, Private.itemCmp);
+      ArrayExt.insert(this._items, index, item);
+      this._panel.insertWidget(index, widget);
+    }
+
+    private _items = new Array<Private.IRankItem>();
+    private _panel = new Panel();
+  }
+
+  /**
    * A class which manages a side bar and related stacked panel.
    */
   export class SideBarHandler {
     /**
      * Construct a new side bar handler.
      */
-    constructor(side: string) {
-      this._sideBar = new TabBarSvg<Widget>({
-        kind: 'sideBar',
+    constructor() {
+      this._sideBar = new TabBar<Widget>({
         insertBehavior: 'none',
         removeBehavior: 'none',
         allowDeselect: true
@@ -1122,6 +1184,17 @@ namespace Private {
       // Store the parent id in the title dataset
       // in order to dispatch click events to the right widget.
       title.dataset = { id: widget.id };
+
+      if (title.icon instanceof LabIcon) {
+        // bind an appropriate style to the icon
+        title.icon = title.icon.bindprops({
+          stylesheet: 'sideBar'
+        });
+      } else if (typeof title.icon === 'string' || !title.icon) {
+        // add some classes to help with displaying css background imgs
+        title.iconClass = classes(title.iconClass, 'jp-Icon', 'jp-Icon-20');
+      }
+
       this._refreshVisibility();
     }
 

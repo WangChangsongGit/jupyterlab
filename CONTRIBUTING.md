@@ -69,7 +69,7 @@ You can launch a binder with the latest JupyterLab master to test something (thi
 
 ### Installing Node.js and jlpm
 
-Building JupyterLab from its GitHub source code requires Node.js.
+Building JupyterLab from its GitHub source code requires Node.js. The development version requires Node.js version 12+.
 
 If you use `conda`, you can get it with:
 
@@ -84,6 +84,12 @@ brew install node
 ```
 
 You can also use the installer from the [Node.js](https://nodejs.org) website.
+
+To check which version of Node.js is installed:
+
+```bash
+node -v
+```
 
 ## Installing JupyterLab
 
@@ -495,7 +501,7 @@ Alternatively, you can install the documentation dependencies in an existing env
 conda env update -n <ENVIRONMENT> -f docs/environment.yml
 ```
 
-The Developer Documentation includes a [guide](http://jupyterlab.readthedocs.io/en/latest/developer/documentation.html) to writing documentation including writing style, naming conventions, keyboard shortcuts, and screenshots.
+The Developer Documentation includes a [guide](https://jupyterlab.readthedocs.io/en/latest/developer/contributing.html) to writing documentation including writing style, naming conventions, keyboard shortcuts, and screenshots.
 
 To test the docs run:
 
@@ -570,7 +576,7 @@ are considered to be a core dependency unless they are explicitly marked otherwi
 
 ### Linking/Unlinking Packages to JupyterLab
 
-If you want to make changes to one of JupyterLab's external packages (for example, [Phosphor](https://github.com/phosphorjs/phosphor)) and test them out against your copy of JupyterLab, you can easily do so using the `link` command:
+If you want to make changes to one of JupyterLab's external packages (for example, [Lumino](https://github.com/jupyterlab/lumino)) and test them out against your copy of JupyterLab, you can easily do so using the `link` command:
 
 1.  Make your changes and then build the external package
 2.  Register a link to the modified external package
@@ -593,7 +599,7 @@ You can then (re)build JupyterLab and everything should be back to default.
 
 If you're working on an external project with more than one package, you'll probably have to link in your copies of every package in the project, including those you made no changes to. Failing to do so may cause issues relating to duplication of shared state.
 
-Specifically, when working with Phosphor, you'll probably have to link your copy of the `"@phosphor/messaging"` package (in addition to whatever packages you actually made changes to). This is due to potential duplication of objects contained in the `MessageLoop` namespace provided by the `messaging` package.
+Specifically, when working with Lumino, you'll probably have to link your copy of the `"@lumino/messaging"` package (in addition to whatever packages you actually made changes to). This is due to potential duplication of objects contained in the `MessageLoop` namespace provided by the `messaging` package.
 
 ## Notes
 

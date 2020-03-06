@@ -9,12 +9,12 @@ import { IRenderMime } from '@jupyterlab/rendermime-interfaces';
 import { PathExt, URLExt } from '@jupyterlab/coreutils';
 
 import {
-  IClientSession,
+  ISessionContext,
   ISanitizer,
   defaultSanitizer
 } from '@jupyterlab/apputils';
 
-import { ReadonlyJSONObject } from '@phosphor/coreutils';
+import { ReadonlyPartialJSONObject } from '@lumino/coreutils';
 
 import { MimeModel } from './mimemodel';
 
@@ -92,7 +92,7 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
    *   or `undefined` if the mime type cannot be rendered.
    */
   preferredMimeType(
-    bundle: ReadonlyJSONObject,
+    bundle: ReadonlyPartialJSONObject,
     safe: 'ensure' | 'prefer' | 'any' = 'ensure'
   ): string | undefined {
     // Try to find a safe factory first, if preferred.
@@ -166,7 +166,8 @@ export class RenderMimeRegistry implements IRenderMimeRegistry {
       resolver: options.resolver || this.resolver || undefined,
       sanitizer: options.sanitizer || this.sanitizer || undefined,
       linkHandler: options.linkHandler || this.linkHandler || undefined,
-      latexTypesetter: options.latexTypesetter || this.latexTypesetter
+      latexTypesetter:
+        options.latexTypesetter || this.latexTypesetter || undefined
     });
 
     // Clone the internal state.
@@ -355,7 +356,7 @@ export namespace RenderMimeRegistry {
       return URLExt.isLocal(url) || !!this._contents.driveName(path);
     }
 
-    private _session: Session.ISession | IClientSession;
+    private _session: ISessionContext | Session.ISessionConnection;
     private _contents: Contents.IManager;
   }
 
@@ -365,8 +366,11 @@ export namespace RenderMimeRegistry {
   export interface IUrlResolverOptions {
     /**
      * The session used by the resolver.
+     *
+     * #### Notes
+     * For convenience, this can be a session context as well.
      */
-    session: Session.ISession | IClientSession;
+    session: ISessionContext | Session.ISessionConnection;
 
     /**
      * The contents manager used by the resolver.
@@ -406,5 +410,13 @@ namespace Private {
       }
       return p1.id - p2.id;
     });
+  }
+
+  export function sessionConnection(
+    s: Session.ISessionConnection | ISessionContext
+  ): Session.ISessionConnection | null {
+    return (s as any).sessionChanged
+      ? (s as ISessionContext).session
+      : (s as Session.ISessionConnection);
   }
 }

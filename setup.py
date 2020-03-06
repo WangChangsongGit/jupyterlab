@@ -57,7 +57,7 @@ def check_assets():
     # Representative files that should exist after a successful build
     targets = [
         'static/package.json',
-        'schemas/@jupyterlab/shortcuts-extension/plugin.json',
+        'schemas/@jupyterlab/shortcuts-extension/shortcuts.json',
         'themes/@jupyterlab/theme-light-extension/index.css'
     ]
 
@@ -158,6 +158,7 @@ setup_args['extras_require'] = {
 }
 
 
+setup_args['package_data'] = package_data_spec
 setup_args['include_package_data'] = True
 setup_args['python_requires'] = '>=3.5'
 
@@ -167,7 +168,6 @@ setup_args['entry_points'] = {
     'console_scripts': [
         'jupyter-lab = jupyterlab.labapp:main',
         'jupyter-labextension = jupyterlab.labextensions:main',
-        'jupyter-labhub = jupyterlab.labhubapp:main',
         'jlpm = jupyterlab.jlpmapp:main',
     ]
 }

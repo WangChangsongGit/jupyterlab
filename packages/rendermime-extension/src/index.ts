@@ -77,15 +77,20 @@ function activate(
   return new RenderMimeRegistry({
     initialFactories: standardRendererFactories,
     linkHandler: !docManager
-      ? null
+      ? undefined
       : {
           handleLink: (node: HTMLElement, path: string, id?: string) => {
+            // If node has the download attribute explicitly set, use the
+            // default browser downloading behavior.
+            if (node.tagName === 'A' && node.hasAttribute('download')) {
+              return;
+            }
             app.commandLinker.connectNode(node, CommandIDs.handleLink, {
               path,
               id
             });
           }
         },
-    latexTypesetter
+    latexTypesetter: latexTypesetter ?? undefined
   });
 }

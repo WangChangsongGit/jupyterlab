@@ -3,17 +3,18 @@
 
 import { JupyterFrontEnd } from '@jupyterlab/application';
 
-import { ICommandPalette, WidgetTracker } from '@jupyterlab/apputils';
+import {
+  ICommandPalette,
+  WidgetTracker,
+  ISessionContextDialogs,
+  sessionContextDialogs
+} from '@jupyterlab/apputils';
 
 import { CodeEditor } from '@jupyterlab/codeeditor';
 
 import { IConsoleTracker } from '@jupyterlab/console';
 
-import {
-  ISettingRegistry,
-  MarkdownCodeBlocks,
-  PathExt
-} from '@jupyterlab/coreutils';
+import { MarkdownCodeBlocks, PathExt } from '@jupyterlab/coreutils';
 
 import { IDocumentWidget } from '@jupyterlab/docregistry';
 
@@ -31,11 +32,15 @@ import {
   IViewMenu
 } from '@jupyterlab/mainmenu';
 
-import { CommandRegistry } from '@phosphor/commands';
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
 
-import { JSONObject, ReadonlyJSONObject } from '@phosphor/coreutils';
+import { markdownIcon, textEditorIcon } from '@jupyterlab/ui-components';
 
-import { Menu } from '@phosphor/widgets';
+import { CommandRegistry } from '@lumino/commands';
+
+import { JSONObject, ReadonlyPartialJSONObject } from '@lumino/coreutils';
+
+import { Menu } from '@lumino/widgets';
 
 /**
  * The command IDs used by the fileeditor plugin.
@@ -67,19 +72,11 @@ export namespace CommandIDs {
 }
 
 /**
- * The class name for the text editor icon from the default theme.
- */
-export const EDITOR_ICON_CLASS = 'jp-MaterialIcon jp-TextEditorIcon';
-
-/**
- * The class name for the text editor icon from the default theme.
- */
-export const MARKDOWN_ICON_CLASS = 'jp-MarkdownIcon';
-
-/**
  * The name of the factory that creates editor widgets.
  */
 export const FACTORY = 'Editor';
+
+let config: CodeEditor.IConfig = { ...CodeEditor.defaultConfig };
 
 /**
  * A utility class for adding commands and menu items,
@@ -93,16 +90,16 @@ export namespace Commands {
     commands: CommandRegistry
   ): (
     widget: IDocumentWidget<FileEditor>,
-    args?: ReadonlyJSONObject
+    args?: ReadonlyPartialJSONObject
   ) => Promise<void> {
     return async function createConsole(
       widget: IDocumentWidget<FileEditor>,
-      args?: ReadonlyJSONObject
+      args?: ReadonlyPartialJSONObject
     ): Promise<void> {
       const options = args || {};
       const console = await commands.execute('console:create', {
         activate: options['activate'],
-        name: widget.context.contentsModel.name,
+        name: widget.context.contentsModel?.name,
         path: widget.context.path,
         preferredLanguage: widget.context.model.defaultKernelLanguage,
         ref: widget.id,
@@ -111,9 +108,50 @@ export namespace Commands {
 
       widget.context.pathChanged.connect((sender, value) => {
         console.session.setPath(value);
-        console.session.setName(widget.context.contentsModel.name);
+        console.session.setName(widget.context.contentsModel?.name);
       });
     };
+  }
+
+  /**
+   * Update the setting values.
+   */
+  export function updateSettings(
+    settings: ISettingRegistry.ISettings,
+    commands: CommandRegistry
+  ): void {
+    config = {
+      ...CodeEditor.defaultConfig,
+      ...(settings.get('editorConfig').composite as JSONObject)
+    };
+
+    // Trigger a refresh of the rendered commands
+    commands.notifyCommandChanged();
+  }
+
+  /**
+   * Update the settings of the current tracker instances.
+   */
+  export function updateTracker(
+    tracker: WidgetTracker<IDocumentWidget<FileEditor>>
+  ): void {
+    tracker.forEach(widget => {
+      updateWidget(widget.content);
+    });
+  }
+
+  /**
+   * Update the settings of a widget.
+   * Skip global settings for transient editor specific configs.
+   */
+  export function updateWidget(widget: FileEditor): void {
+    const transientConfigs = ['lineNumbers', 'lineWrap', 'matchBrackets'];
+    const editor = widget.editor;
+    Object.keys(config).forEach((key: keyof CodeEditor.IConfig) => {
+      if (!transientConfigs.includes(key)) {
+        editor.setOption(key, config[key]);
+      }
+    });
   }
 
   /**
@@ -121,7 +159,6 @@ export namespace Commands {
    */
   export function addCommands(
     commands: CommandRegistry,
-    config: CodeEditor.IConfig,
     settingRegistry: ISettingRegistry,
     id: string,
     isEnabled: () => boolean,
@@ -129,17 +166,17 @@ export namespace Commands {
     browserFactory: IFileBrowserFactory
   ) {
     // Add a command to change font size.
-    addChangeFontSizeCommand(commands, config, settingRegistry, id);
+    addChangeFontSizeCommand(commands, settingRegistry, id);
 
-    addLineNumbersCommand(commands, config, settingRegistry, id, isEnabled);
+    addLineNumbersCommand(commands, settingRegistry, id, isEnabled);
 
-    addWordWrapCommand(commands, config, settingRegistry, id, isEnabled);
+    addWordWrapCommand(commands, settingRegistry, id, isEnabled);
 
-    addChangeTabsCommand(commands, config, settingRegistry, id);
+    addChangeTabsCommand(commands, settingRegistry, id);
 
-    addMatchBracketsCommand(commands, config, settingRegistry, id, isEnabled);
+    addMatchBracketsCommand(commands, settingRegistry, id, isEnabled);
 
-    addAutoClosingBracketsCommand(commands, config, settingRegistry, id);
+    addAutoClosingBracketsCommand(commands, settingRegistry, id);
 
     addCreateConsoleCommand(commands, tracker, isEnabled);
 
@@ -161,7 +198,6 @@ export namespace Commands {
    */
   export function addChangeFontSizeCommand(
     commands: CommandRegistry,
-    config: CodeEditor.IConfig,
     settingRegistry: ISettingRegistry,
     id: string
   ) {
@@ -196,7 +232,6 @@ export namespace Commands {
    */
   export function addLineNumbersCommand(
     commands: CommandRegistry,
-    config: CodeEditor.IConfig,
     settingRegistry: ISettingRegistry,
     id: string,
     isEnabled: () => boolean
@@ -221,7 +256,6 @@ export namespace Commands {
    */
   export function addWordWrapCommand(
     commands: CommandRegistry,
-    config: CodeEditor.IConfig,
     settingRegistry: ISettingRegistry,
     id: string,
     isEnabled: () => boolean
@@ -251,7 +285,6 @@ export namespace Commands {
    */
   export function addChangeTabsCommand(
     commands: CommandRegistry,
-    config: CodeEditor.IConfig,
     settingRegistry: ISettingRegistry,
     id: string
   ) {
@@ -279,7 +312,6 @@ export namespace Commands {
    */
   export function addMatchBracketsCommand(
     commands: CommandRegistry,
-    config: CodeEditor.IConfig,
     settingRegistry: ISettingRegistry,
     id: string,
     isEnabled: () => boolean
@@ -304,7 +336,6 @@ export namespace Commands {
    */
   export function addAutoClosingBracketsCommand(
     commands: CommandRegistry,
-    config: CodeEditor.IConfig,
     settingRegistry: ISettingRegistry,
     id: string
   ) {
@@ -356,13 +387,13 @@ export namespace Commands {
     commands.addCommand(CommandIDs.runCode, {
       execute: () => {
         // Run the appropriate code, taking into account a ```fenced``` code block.
-        const widget = tracker.currentWidget.content;
+        const widget = tracker.currentWidget?.content;
 
         if (!widget) {
           return;
         }
 
-        let code = '';
+        let code: string | undefined = '';
         const editor = widget.editor;
         const path = widget.context.path;
         const extension = PathExt.extname(path);
@@ -425,7 +456,7 @@ export namespace Commands {
   ) {
     commands.addCommand(CommandIDs.runAllCode, {
       execute: () => {
-        let widget = tracker.currentWidget.content;
+        let widget = tracker.currentWidget?.content;
 
         if (!widget) {
           return;
@@ -522,7 +553,7 @@ export namespace Commands {
     commands.addCommand(CommandIDs.createNew, {
       label: args => (args['isPalette'] ? 'New Text File' : 'Text File'),
       caption: 'Create a new text file',
-      iconClass: args => (args['isPalette'] ? '' : EDITOR_ICON_CLASS),
+      icon: args => (args['isPalette'] ? undefined : textEditorIcon),
       execute: args => {
         let cwd = args['cwd'] || browserFactory.defaultBrowser.model.path;
         return createNew(commands, cwd as string);
@@ -541,7 +572,7 @@ export namespace Commands {
       label: args =>
         args['isPalette'] ? 'New Markdown File' : 'Markdown File',
       caption: 'Create a new markdown file',
-      iconClass: args => (args['isPalette'] ? '' : MARKDOWN_ICON_CLASS),
+      icon: args => (args['isPalette'] ? undefined : markdownIcon),
       execute: args => {
         let cwd = args['cwd'] || browserFactory.defaultBrowser.model.path;
         return createNew(commands, cwd as string, 'md');
@@ -664,7 +695,8 @@ export namespace Commands {
     menu: IMainMenu,
     commands: CommandRegistry,
     tracker: WidgetTracker<IDocumentWidget<FileEditor>>,
-    consoleTracker: IConsoleTracker
+    consoleTracker: IConsoleTracker,
+    sessionDialogs: ISessionContextDialogs | null
   ) {
     // Add the editing commands to the settings menu.
     addEditingCommandsToSettingsMenu(menu, commands);
@@ -685,7 +717,13 @@ export namespace Commands {
     addConsoleCreatorToFileMenu(menu, commands, tracker);
 
     // Add a code runner to the run menu.
-    addCodeRunnersToRunMenu(menu, commands, tracker, consoleTracker);
+    addCodeRunnersToRunMenu(
+      menu,
+      commands,
+      tracker,
+      consoleTracker,
+      sessionDialogs
+    );
   }
 
   /**
@@ -823,26 +861,31 @@ export namespace Commands {
     menu: IMainMenu,
     commands: CommandRegistry,
     tracker: WidgetTracker<IDocumentWidget<FileEditor>>,
-    consoleTracker: IConsoleTracker
+    consoleTracker: IConsoleTracker,
+    sessionDialogs: ISessionContextDialogs | null
   ) {
     menu.runMenu.codeRunners.add({
       tracker,
       noun: 'Code',
       isEnabled: current =>
-        !!consoleTracker.find(c => c.session.path === current.context.path),
+        !!consoleTracker.find(
+          widget => widget.sessionContext.session?.path === current.context.path
+        ),
       run: () => commands.execute(CommandIDs.runCode),
       runAll: () => commands.execute(CommandIDs.runAllCode),
       restartAndRunAll: current => {
-        const console = consoleTracker.find(
-          console => console.session.path === current.context.path
+        const widget = consoleTracker.find(
+          widget => widget.sessionContext.session?.path === current.context.path
         );
-        if (console) {
-          return console.session.restart().then(restarted => {
-            if (restarted) {
-              void commands.execute(CommandIDs.runAllCode);
-            }
-            return restarted;
-          });
+        if (widget) {
+          return (sessionDialogs || sessionContextDialogs)
+            .restart(widget.sessionContext)
+            .then(restarted => {
+              if (restarted) {
+                void commands.execute(CommandIDs.runAllCode);
+              }
+              return restarted;
+            });
         }
       }
     } as IRunMenu.ICodeRunner<IDocumentWidget<FileEditor>>);

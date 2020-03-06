@@ -7,13 +7,15 @@ import {
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
 
-import { ICommandPalette, WidgetTracker } from '@jupyterlab/apputils';
+import {
+  ICommandPalette,
+  WidgetTracker,
+  ISessionContextDialogs
+} from '@jupyterlab/apputils';
 
 import { CodeEditor, IEditorServices } from '@jupyterlab/codeeditor';
 
 import { IConsoleTracker } from '@jupyterlab/console';
-
-import { ISettingRegistry } from '@jupyterlab/coreutils';
 
 import { IDocumentWidget } from '@jupyterlab/docregistry';
 
@@ -30,13 +32,15 @@ import { ILauncher } from '@jupyterlab/launcher';
 
 import { IMainMenu } from '@jupyterlab/mainmenu';
 
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
+
 import { IStatusBar } from '@jupyterlab/statusbar';
 
-import { JSONObject } from '@phosphor/coreutils';
+import { JSONObject } from '@lumino/coreutils';
 
-import { Menu } from '@phosphor/widgets';
+import { Menu } from '@lumino/widgets';
 
-import { Commands, EDITOR_ICON_CLASS, FACTORY } from './commands';
+import { Commands, FACTORY } from './commands';
 
 export { Commands } from './commands';
 
@@ -52,7 +56,13 @@ const plugin: JupyterFrontEndPlugin<IEditorTracker> = {
     IFileBrowserFactory,
     ISettingRegistry
   ],
-  optional: [ICommandPalette, ILauncher, IMainMenu, ILayoutRestorer],
+  optional: [
+    ICommandPalette,
+    ILauncher,
+    IMainMenu,
+    ILayoutRestorer,
+    ISessionContextDialogs
+  ],
   provides: IEditorTracker,
   autoStart: true
 };
@@ -121,7 +131,9 @@ export const tabSpaceStatus: JupyterFrontEndPlugin<void> = {
         align: 'right',
         rank: 1,
         isActive: () => {
-          return shell.currentWidget && editorTracker.has(shell.currentWidget);
+          return (
+            !!shell.currentWidget && editorTracker.has(shell.currentWidget)
+          );
         }
       }
     );
@@ -146,7 +158,8 @@ function activate(
   palette: ICommandPalette | null,
   launcher: ILauncher | null,
   menu: IMainMenu | null,
-  restorer: ILayoutRestorer | null
+  restorer: ILayoutRestorer | null,
+  sessionDialogs: ISessionContextDialogs | null
 ): IEditorTracker {
   const id = plugin.id;
   const namespace = 'editor';
@@ -166,8 +179,6 @@ function activate(
     tracker.currentWidget !== null &&
     tracker.currentWidget === shell.currentWidget;
 
-  let config: CodeEditor.IConfig = { ...CodeEditor.defaultConfig };
-
   // Handle state restoration.
   if (restorer) {
     void restorer.restore(tracker, {
@@ -177,74 +188,39 @@ function activate(
     });
   }
 
-  /**
-   * Update the setting values.
-   */
-  function updateSettings(settings: ISettingRegistry.ISettings): void {
-    config = {
-      ...CodeEditor.defaultConfig,
-      ...(settings.get('editorConfig').composite as JSONObject)
-    };
-
-    // Trigger a refresh of the rendered commands
-    app.commands.notifyCommandChanged();
-  }
-
-  /**
-   * Update the settings of the current tracker instances.
-   */
-  function updateTracker(): void {
-    tracker.forEach(widget => {
-      updateWidget(widget.content);
-    });
-  }
-
-  /**
-   * Update the settings of a widget.
-   */
-  function updateWidget(widget: FileEditor): void {
-    const editor = widget.editor;
-    Object.keys(config).forEach((key: keyof CodeEditor.IConfig) => {
-      editor.setOption(key, config[key]);
-    });
-  }
-
   // Add a console creator to the File menu
   // Fetch the initial state of the settings.
   Promise.all([settingRegistry.load(id), restored])
     .then(([settings]) => {
-      updateSettings(settings);
-      updateTracker();
+      Commands.updateSettings(settings, commands);
+      Commands.updateTracker(tracker);
       settings.changed.connect(() => {
-        updateSettings(settings);
-        updateTracker();
+        Commands.updateSettings(settings, commands);
+        Commands.updateTracker(tracker);
       });
     })
     .catch((reason: Error) => {
       console.error(reason.message);
-      updateTracker();
+      Commands.updateTracker(tracker);
     });
 
   factory.widgetCreated.connect((sender, widget) => {
-    widget.title.icon = EDITOR_ICON_CLASS;
-
     // Notify the widget tracker if restore data needs to update.
     widget.context.pathChanged.connect(() => {
       void tracker.save(widget);
     });
     void tracker.add(widget);
-    updateWidget(widget.content);
+    Commands.updateWidget(widget.content);
   });
   app.docRegistry.addWidgetFactory(factory);
 
   // Handle the settings of new widgets.
   tracker.widgetAdded.connect((sender, widget) => {
-    updateWidget(widget.content);
+    Commands.updateWidget(widget.content);
   });
 
   Commands.addCommands(
     commands,
-    config,
     settingRegistry,
     id,
     isEnabled,
@@ -262,7 +238,13 @@ function activate(
   }
 
   if (menu) {
-    Commands.addMenuItems(menu, commands, tracker, consoleTracker);
+    Commands.addMenuItems(
+      menu,
+      commands,
+      tracker,
+      consoleTracker,
+      sessionDialogs
+    );
   }
 
   Commands.addContextMenuItems(app);
