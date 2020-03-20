@@ -29,11 +29,13 @@ see the :ref:`developer documentation <developer_extensions>`.
 In order to install JupyterLab extensions, you need to have `Node.js
 <https://nodejs.org/>`__ installed.
 
-If you use ``conda``, you can get it with:
+If you use ``conda`` with ``conda-forge`` packages, you can get it with:
 
 .. code:: bash
 
     conda install -c conda-forge nodejs
+    
+If you use ``conda`` with default Anaconda packages (i.e., you don't normally use ``conda-forge``), you should install nodejs with ``conda install nodejs`` instead.
 
 If you use `Homebrew <https://brew.sh/>`__ on Mac OS X:
 
@@ -526,7 +528,7 @@ JupyterLab Workspaces Directory
 JupyterLab sessions always reside in a workspace. Workspaces contain the state
 of JupyterLab: the files that are currently open, the layout of the application
 areas and tabs, etc. When the page is refreshed, the workspace is restored.
-By default, the location is ``~/.jupyter/lab/workspacess/``, where ``~`` is the user's home directory. This folder is not in the JupyterLab application directory,
+By default, the location is ``~/.jupyter/lab/workspaces/``, where ``~`` is the user's home directory. This folder is not in the JupyterLab application directory,
 because these files are typically shared across Python environments.
 The location can be modified using the ``JUPYTERLAB_WORKSPACES_DIR`` environment variable. These files can be imported and exported to create default "profiles",
 using the :ref:`workspace command line tool <url-workspaces-cli>`.
